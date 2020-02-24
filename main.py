@@ -1,8 +1,13 @@
+# -*- coding: utf-8 -*-
+
 from requests_html import HTMLSession
 from requests.exceptions import RequestException
 import re
 import csv
 from multiprocessing import Pool
+import sys
+
+csv.field_size_limit(sys.maxsize)
 
 session = HTMLSession()
 
@@ -14,18 +19,6 @@ def search_email(link):
     for key in info:
         if re.findall('\w+@\w+.\w+', key):
             return key
-    # try:
-    #     emails = re.findall('\w+@\w+.\w+', resp.text)
-    #     emaile = emails[0]
-    # except:
-    #     emaile = " "
-    #
-    # print(emaile)
-    # return emaile
-    # if len(emails) >= 1:
-    #     for key in emails:
-    #         emailse.add(key)
-    # print(emailse)
 
 def write_csv(data):
     with open('data.csv', 'a') as f:
@@ -34,9 +27,9 @@ def write_csv(data):
         writer.writerow(data)
 
 def check_url(url):
-    with open('data.csv', encoding='utf8') as file:
+    with open('data.csv', 'r') as file:
         fieldnames = ['url', 'email', 'title', 'description', 'keywords']
-        reader = csv.DictReader(file, fieldnames=fieldnames)
+        reader = csv.DictReader((x.replace('\0', '') for x in file), fieldnames=fieldnames)
         read_data = []
         for row in reader:
             read_data.append(row['url'])
@@ -44,7 +37,7 @@ def check_url(url):
     return check
 
 def check_email(email):
-    with open('data.csv', encoding='utf8') as file:
+    with open('data.csv', 'r') as file:
         fieldnames = ['url', 'email', 'title', 'description', 'keywords']
         reader = csv.DictReader(file, fieldnames=fieldnames)
         read_data = []
@@ -54,12 +47,16 @@ def check_email(email):
     return check
 
 def run(url):
+    with open('used_domains.txt', 'a') as used:
+        used.write(url + '\n')
     if not check_url(url):
         try:
-            resp = session.get(url)
+            resp = session.get(url, timeout=3)
+            print(resp.status_code)
         except Exception:
             # except RequestException:
             print('resp error')
+            #print(resp.status_code)
         # print(info)
         try:
             title = resp.html.xpath('//title')[0].text
@@ -67,15 +64,18 @@ def run(url):
             keywords = resp.html.xpath('//meta[@name = "keywords"]/@content')
         except Exception:
             print('Title Error')
-        for email in re.findall('\w+@\w+.\w+', resp.text):
-            if not check_email(email):
-                print(email)
-                data = {'url': url,
-                        'email': email,
-                        'title': title,
-                        'description': desc,
-                        'keywords': keywords}
-                write_csv(data)
+        try:
+            for email in re.findall("[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", resp.text):
+                if not check_email(email):
+                    print(email)
+                    data = {'url': url,
+                            'email': email,
+                            'title': title,
+                            'description': desc,
+                            'keywords': keywords}
+                    write_csv(data)
+        except Exception:
+            print('email error')
         try:
             for key in resp.html.xpath('//a'):
                 if re.search(r'\bКонтак', key.text):
@@ -111,55 +111,26 @@ def run(url):
             print('key error')
 
 def main():
+    used_urls = []
+    with open('used_domains.txt', 'r') as used:
+        for i in used:
+            used_urls.append(i.rstrip('\n'))
+    print(used_urls)
     urls_list= []
+    start_list = []
     with open('domains.txt', 'r') as urls:
         # Обработка для каждого ключевика из файла
-        for line in urls:
-            url = line.rstrip('\n')
-            urls_list.append(url)
-            print(url)
-            #run(url)
-    with Pool(3) as p:
+        for i, line in enumerate(urls):
+            url = 'http://' + line.rstrip('\n').lower()
+            start_list.append(url)
+            if url not in used_urls:
+                print(i, ' ', url)
+                urls_list.append(url)
+                #run(url)
+    with Pool(30) as p:
         p.map(run, urls_list)
-    #print(urls_list)
-
-
-            #         title = resp.html.xpath('//title')[0].text
-            #     except:
-            #         title = " "
-            #     info = resp.html.xpath('//a/@href')
-            #     for key in info:
-            #         if re.findall('\w+@\w+.\w+', key):
-            #             if not check_email(key):
-            #                 print('email' ,key)
-            #                 data = {'url': url,
-            #                         'email': key,
-            #                         'title': title}
-            #                 write_csv(data)
-            #
-            #     info = resp.html.xpath('//a')
-            #     for key in info:
-            #         if re.search(r'\bКонтак', key.text):
-            #             print('д проверки', key.xpath('//@href')[0])
-            #             if re.search(r'\bhtt', key.xpath('//@href')[0]):
-            #                 email = search_email(key.xpath('//@href')[0])
-            #                 #print('email', email)
-            #                 if not check_email(email):
-            #                     print('email', email)
-            #                     data = {'url': url,
-            #                             'email': email,
-            #                             'title': title}
-            #                     write_csv(data)
-            #             else:
-            #                 print(url + key.xpath('//@href')[0])
-            #                 email = search_email(url + key.xpath('//@href')[0])
-            #                 #print('email', email)
-            #                 if not check_email(email):
-            #                     print('email', email)
-            #                     data = {'url': url,
-            #                             'email': email,
-            #                             'title': title}
-            #                     write_csv(data)
+    # print(len(start_list))
+    # print(len(urls_list))
 
 if __name__ == '__main__':
     main()
